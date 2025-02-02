@@ -1,0 +1,363 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  HEAD
+  MANAGER
+  TELECALLER
+  COUNSELOR
+  STUDENT
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  INTERESTED
+  NOT_INTERESTED
+  CONVERTED
+  LOST
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ApplicationStatus {
+  INQUIRY
+  DOCUMENT_COLLECTION
+  APPLICATION_PREPARATION
+  APPLICATION_SUBMITTED
+  OFFER_RECEIVED
+  VISA_PROCESSING
+  VISA_APPROVED
+  VISA_REJECTED
+  ENROLLED
+  CANCELLED
+}
+
+enum UploadStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum CallStatus {
+  CONNECTED
+  NO_ANSWER
+  BUSY
+  WRONG_NUMBER
+  SCHEDULED_CALLBACK
+}
+
+enum FollowUpStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+model User {
+  id            String      @id @default(cuid())
+  employeeId    String      @unique
+  name          String
+  email         String      @unique
+  password      String
+  role          UserRole    @default(STUDENT)
+  status        UserStatus  @default(ACTIVE)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  // Manager-Telecaller relationship
+  managedBy     User?       @relation("ManagerToTelecaller", fields: [managerId], references: [id])
+  managerId     String?
+  telecallers   User[]      @relation("ManagerToTelecaller")
+
+  // Performance and activities
+  performance   Performance?
+  activities    Activity[]
+
+  // Tasks
+  assignedTasks Task[]      @relation("AssignedTo")
+  createdTasks  Task[]      @relation("CreatedBy")
+
+  // Leads and Calls
+  assignedLeads Lead[]      @relation("AssignedTo")
+  managedLeads  Lead[]      @relation("ManagedBy")
+  calls         Call[]
+
+  // Lead Uploads
+  uploadedLeads    LeadUpload[] @relation("ManagerUploads")
+  assignedUploads  LeadUpload[] @relation("TelecallerUploads")
+
+  // Notifications
+  notifications Notification[]
+
+  // For Students
+  application   Application?
+  counselingSessions CounselingSession[]
+  documents     Document[]
+
+  // CSV Relations
+  uploadedCSVs    LeadCSV[]   @relation("ManagerCSV")
+  assignedCSVs    LeadCSV[]   @relation("TelecallerCSV")
+
+  // Follow-ups
+  assignedFollowUps FollowUp[] @relation("CounsellorFollowUps")
+
+  @@map("users")
+}
+
+model LeadUpload {
+  id              String       @id @default(cuid())
+  fileName        String
+  uploadedAt      DateTime     @default(now())
+  totalLeads      Int
+  successfulLeads Int
+  failedLeads     Int
+  status          UploadStatus @default(PROCESSING)
+  errors          Json?        // Array of error messages
+  
+  // Relations
+  managerId       String
+  manager         User         @relation("ManagerUploads", fields: [managerId], references: [id])
+  assignedToId    String
+  assignedTo      User         @relation("TelecallerUploads", fields: [assignedToId], references: [id])
+
+  @@map("lead_uploads")
+}
+
+model Performance {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id])
+  leads             Int      @default(0)
+  conversions       Int      @default(0)
+  conversionRate    Float    @default(0)
+  callsMade         Int      @default(0)
+  avgCallDuration   Float    @default(0)
+  successfulCalls   Int      @default(0)
+  missedCalls       Int      @default(0)
+  followUpRate      Float    @default(0)
+  lastUpdated       DateTime @default(now())
+  monthlyTarget     Int      @default(0)
+  achievements      Achievement[]
+
+  @@map("performances")
+}
+
+model Lead {
+  id                  String      @id @default(cuid())
+  name                String
+  email               String?
+  phone               String
+  status              LeadStatus  @default(NEW)
+  
+  // Assignments
+  assignedTo          User?       @relation("AssignedTo", fields: [assignedToId], references: [id])
+  assignedToId        String?
+  managedBy           User?       @relation("ManagedBy", fields: [managedById], references: [id])
+  managedById         String?
+
+  // Lead Details
+  source              String?
+  preferredCountries  String[]
+  preferredCourses    String[]
+  budget              Float?
+  academicDetails     Json?
+  notes               String?
+  
+  // Telecaller specific fields
+  lastContactedAt     DateTime?
+  nextFollowUpDate    DateTime?
+  totalCallAttempts   Int         @default(0)
+  priority           Int         @default(0)
+  bestTimeToCall     String?
+  interestedCourse   String?
+  interestedCountry  String?
+
+  // Related records
+  calls              Call[]
+  application        Application?
+  activities         Activity[]
+  
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@map("leads")
+}
+
+model Call {
+  id          String     @id @default(cuid())
+  leadId      String
+  lead        Lead       @relation(fields: [leadId], references: [id])
+  userId      String
+  user        User       @relation(fields: [userId], references: [id])
+  duration    Int
+  notes       String?
+  status      CallStatus
+  outcome     String
+  recordUrl   String?
+  scheduledAt DateTime?
+  followUp    FollowUp?
+  createdAt   DateTime   @default(now())
+
+  @@map("calls")
+}
+
+model FollowUp {
+  id           String         @id @default(cuid())
+  callId       String        @unique
+  call         Call          @relation(fields: [callId], references: [id])
+  scheduledFor DateTime
+  status       FollowUpStatus @default(PENDING)
+  notes        String?
+  reminder     Boolean       @default(false)
+  completedAt  DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  assignedToId String?
+  assignedTo   User?        @relation("CounsellorFollowUps", fields: [assignedToId], references: [id])
+
+  @@map("follow_ups")
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  title       String
+  description String?
+  status      TaskStatus @default(PENDING)
+  priority    Int        @default(0)
+  
+  assignedTo  User       @relation("AssignedTo", fields: [assignedToId], references: [id])
+  assignedToId String
+  createdBy   User       @relation("CreatedBy", fields: [createdById], references: [id])
+  createdById String
+  
+  dueDate     DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@map("tasks")
+}
+
+model Application {
+  id              String            @id @default(cuid())
+  leadId          String?           @unique
+  lead            Lead?             @relation(fields: [leadId], references: [id])
+  studentId       String            @unique
+  student         User              @relation(fields: [studentId], references: [id])
+  status          ApplicationStatus @default(INQUIRY)
+  
+  university      String
+  course          String
+  intake          String
+  
+  documents       Document[]
+  visaDetails     Json?
+  offerDetails    Json?
+  
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@map("applications")
+}
+
+model Document {
+  id            String      @id @default(cuid())
+  name          String
+  type          String
+  url           String
+  userId        String
+  user          User        @relation(fields: [userId], references: [id])
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id])
+  status        String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@map("documents")
+}
+
+model Activity {
+  id          String   @id @default(cuid())
+  type        String
+  description String
+  metadata    Json?
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  leadId      String?
+  lead        Lead?    @relation(fields: [leadId], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@map("activities")
+}
+
+model Achievement {
+  id            String      @id @default(cuid())
+  performanceId String
+  performance   Performance @relation(fields: [performanceId], references: [id])
+  title         String
+  description   String
+  date          DateTime
+  type          String
+  reward        String?
+
+  @@map("achievements")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  type      String
+  createdAt DateTime @default(now())
+
+  @@map("notifications")
+}
+
+model CounselingSession {
+  id          String   @id @default(cuid())
+  studentId   String
+  student     User     @relation(fields: [studentId], references: [id])
+  title       String
+  notes       String?
+  status      String
+  scheduledAt DateTime
+  duration    Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("counseling_sessions")
+}
+
+model LeadCSV {
+  id              String      @id @default(cuid())
+  fileName        String
+  fileContent     Bytes
+  uploadedAt      DateTime    @default(now())
+  processedAt     DateTime?
+  status          String
+  
+  managerId       String
+  manager         User        @relation("ManagerCSV", fields: [managerId], references: [id])
+  assignedToId    String
+  assignedTo      User        @relation("TelecallerCSV", fields: [assignedToId], references: [id])
+
+  @@map("lead_csvs")
+}
