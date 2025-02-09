@@ -136,7 +136,7 @@ const roleNavItems = {
     },
     {
       title: "Leads",
-      href: "/dashboard/telecaller/leads",
+      href: "/dashboard/telecaller/leads/my-leads",
       icon: Users,
       subItems: [
         {
